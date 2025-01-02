@@ -1,5 +1,14 @@
 #pragma once
 
+struct DirectionSwitchingContext
+{
+    int endSwitch1Pin;
+    int endSwitch2Pin;
+    int enablePin;
+
+    bool reversed = false;
+};
+
 enum class PotState
 {
     DeadZone,
@@ -8,31 +17,39 @@ enum class PotState
     Unknown
 };
 
+enum class Direction
+{
+    Forward,
+    Backward
+};
+
 class PowerControl
 {
-    
     private:
         //Editable values. Adjust variable due to HW behavioral
-        const int potDeadZoneSize = 100;
+        const int potDeadZoneSize = 200;
 
     public:
-        PowerControl(int PotPin, int pwmOutPin, int positiveOutputEnablePin, int negativeOutputEnablePin);
+        PowerControl(int potPin, int pwmOutPin, int positiveOutputEnablePin, int negativeOutputEnablePin, DirectionSwitchingContext* switchingContext);
         
         auto updateOutput()                             -> void;
         
     private:
         auto GetPotState(int analogValue)               -> PotState;
         auto TurnOffOutput()                            -> void;
+        auto SetOutput(Direction direction)             -> void;
         auto SetOutputPwm(int lowInputLimit,
                           int highInputLimit, 
                           int relativeValue, 
                           bool inverted)                -> void;
+        auto ShouldReverseDirection()                   -> bool;
     
-        const int PotPin;
+        const int potPin;
         const int pwmOutPin;
         const int positiveOutputEnablePin;
         const int negativeOutputEnablePin;
-        
+        DirectionSwitchingContext* switchingContext;
+
         //Do not edit this
         const long analogInMaxValue      = 1023;
         const long analogInHalfValue     = analogInMaxValue / 2;
@@ -41,25 +58,34 @@ class PowerControl
         const long potDeadZoneLowerLimit = analogInHalfValue - potDeadZoneHalfSize + 1;
         const long potDeadZoneUpperLimit = analogInHalfValue + potDeadZoneHalfSize;
         
-        const unsigned int pwmMaxOutput          = 255;
+        const unsigned int pwmMaxOutput  = 255;
+        
 };
 
-PowerControl::PowerControl(int PotPin, int pwmOutPin, int positiveOutputEnablePin, int negativeOutputEnablePin) :
-    PotPin(PotPin),
-    pwmOutPin(pwmOutPin),
-    positiveOutputEnablePin(positiveOutputEnablePin),
-    negativeOutputEnablePin(negativeOutputEnablePin) 
+PowerControl::PowerControl(int potPinInst, int pwmOutPinInst, int positiveOutputEnablePinInst, int negativeOutputEnablePinInst, DirectionSwitchingContext* switchingContextInst) :
+    potPin(potPinInst),
+    pwmOutPin(pwmOutPinInst),
+    positiveOutputEnablePin(positiveOutputEnablePinInst),
+    negativeOutputEnablePin(negativeOutputEnablePinInst),
+    switchingContext(switchingContextInst)
 {
-    pinMode(PotPin,                     INPUT);
+    pinMode(potPin,                     INPUT);
     pinMode(pwmOutPin,                  OUTPUT);
     pinMode(positiveOutputEnablePin,    OUTPUT);
     pinMode(negativeOutputEnablePin,    OUTPUT);
+    
+    if(switchingContext)
+    {
+        pinMode(switchingContext->endSwitch1Pin, INPUT_PULLUP);
+        pinMode(switchingContext->endSwitch2Pin, INPUT_PULLUP);
+        pinMode(switchingContext->enablePin,     INPUT_PULLUP);
+    }
 }
 
 auto PowerControl::updateOutput() -> void
 {
-    auto potValue = analogRead(PotPin);
-    
+    auto potValue = analogRead(potPin);
+
     switch(GetPotState(potValue))
     {
         case PotState::DeadZone:
@@ -69,17 +95,13 @@ auto PowerControl::updateOutput() -> void
         }
         case PotState::NegativeValue:
         {
-            digitalWrite(positiveOutputEnablePin, 0);
-            digitalWrite(negativeOutputEnablePin, 1);
-            
+            SetOutput(ShouldReverseDirection() ? Direction::Forward : Direction::Backward);
             SetOutputPwm(0, potDeadZoneLowerLimit, potValue, true);
             break;
         }
         case PotState::PositiveValue:
         {
-            digitalWrite(positiveOutputEnablePin, 1);
-            digitalWrite(negativeOutputEnablePin, 0);
-            
+            SetOutput(ShouldReverseDirection() ? Direction::Backward : Direction::Forward);
             SetOutputPwm(potDeadZoneUpperLimit, analogInMaxValue, potValue, false);
             break;
         }
@@ -117,6 +139,25 @@ auto PowerControl::TurnOffOutput() -> void
     digitalWrite(negativeOutputEnablePin, 0);
 }
 
+auto PowerControl::SetOutput(Direction direction) -> void
+{
+    switch(direction)
+    {
+        case Direction::Forward:
+        {
+            digitalWrite(positiveOutputEnablePin, 0);
+            digitalWrite(negativeOutputEnablePin, 1);
+            break;
+        }
+        case Direction::Backward:
+        {
+            digitalWrite(negativeOutputEnablePin, 0);
+            digitalWrite(positiveOutputEnablePin, 1);
+            break;
+        }
+    }
+}
+
 auto PowerControl::SetOutputPwm(int lowInputLimit, int highInputLimit, int relativeValue, bool inverted) -> void
 {    
     long absoluteValue = relativeValue - lowInputLimit;
@@ -129,4 +170,47 @@ auto PowerControl::SetOutputPwm(int lowInputLimit, int highInputLimit, int relat
     }
 
     analogWrite(pwmOutPin, outValue);
+}
+
+auto PowerControl::ShouldReverseDirection() -> bool
+{
+    if (switchingContext == nullptr)
+    {
+        return false;
+    }
+    
+    bool switchingDisabled = digitalRead(switchingContext->enablePin);
+    if (switchingDisabled)
+    {
+        return false;
+    }
+    
+    if(switchingContext->reversed)
+    {
+        bool endSwitch2Active = !digitalRead(switchingContext->endSwitch2Pin);
+        
+        if(endSwitch2Active)
+        {
+            switchingContext->reversed = false;
+            return false;
+        }
+        else
+        {
+            return true;
+        }
+    }
+    else
+    {
+        bool endSwitch1Active = !digitalRead(switchingContext->endSwitch1Pin);
+        
+        if(endSwitch1Active)
+        {
+            switchingContext->reversed = true;
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
 }

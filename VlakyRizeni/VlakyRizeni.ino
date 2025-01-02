@@ -19,14 +19,20 @@ PowerControl* powerControl1;
 PowerControl* powerControl2;
 PowerControl* powerControl3;
 
+DirectionSwitchingContext switching;
+
 void setup()
 {
-    powerControl1 = new PowerControl(Pot1, pwmOut1, positiveOutputEnable1, negativeOutputEnable1);
-    powerControl2 = new PowerControl(Pot2, pwmOut2, positiveOutputEnable2, negativeOutputEnable2);
-    powerControl3 = new PowerControl(Pot3, pwmOut3, positiveOutputEnable3, negativeOutputEnable3);
+    switching.enablePin      = A6;
+    switching.endSwitch1Pin  = A5;
+    switching.endSwitch2Pin  = A4;
+
+    powerControl1 = new PowerControl(Pot1, pwmOut1, positiveOutputEnable1, negativeOutputEnable1, nullptr);
+    powerControl2 = new PowerControl(Pot2, pwmOut2, positiveOutputEnable2, negativeOutputEnable2, nullptr);
+    powerControl3 = new PowerControl(Pot3, pwmOut3, positiveOutputEnable3, negativeOutputEnable3, &switching);
 }
 
-void loop() 
+void loop()
 {
     powerControl1->updateOutput();
     powerControl2->updateOutput();
